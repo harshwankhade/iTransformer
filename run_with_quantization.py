@@ -10,9 +10,127 @@ from experiments.exp_quantized import Exp_Quantized_Long_Term_Forecast
 from utils.profiling import PerformanceProfiler
 import random
 import numpy as np
+import time
+import psutil
+import os
+from datetime import datetime
+
+
+class PerformanceTracker:
+    """Track time and memory usage during training and testing."""
+    
+    def __init__(self):
+        self.process = psutil.Process(os.getpid())
+        self.start_time = None
+        self.start_memory = None
+        self.start_gpu_memory = None
+        self.events = []
+        
+    def start(self, event_name):
+        """Start tracking an event."""
+        self.start_time = time.time()
+        self.start_memory = self.process.memory_info().rss / 1024 / 1024  # MB
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+            self.start_gpu_memory = torch.cuda.memory_allocated() / 1024 / 1024  # MB
+        else:
+            self.start_gpu_memory = 0
+        
+    def stop(self, event_name):
+        """Stop tracking and record event."""
+        elapsed_time = time.time() - self.start_time
+        end_memory = self.process.memory_info().rss / 1024 / 1024  # MB
+        memory_delta = end_memory - self.start_memory
+        
+        gpu_memory_delta = 0
+        peak_gpu_memory = 0
+        if torch.cuda.is_available():
+            current_gpu_memory = torch.cuda.memory_allocated() / 1024 / 1024
+            gpu_memory_delta = current_gpu_memory - self.start_gpu_memory
+            peak_gpu_memory = torch.cuda.max_memory_allocated() / 1024 / 1024
+        
+        event_info = {
+            'name': event_name,
+            'time_seconds': elapsed_time,
+            'start_memory_mb': self.start_memory,
+            'end_memory_mb': end_memory,
+            'memory_delta_mb': memory_delta,
+            'gpu_memory_delta_mb': gpu_memory_delta,
+            'peak_gpu_memory_mb': peak_gpu_memory,
+            'timestamp': datetime.now()
+        }
+        self.events.append(event_info)
+    
+    def print_summary(self):
+        """Print summary of all tracked events."""
+        if not self.events:
+            return
+            
+        total_time = sum(e['time_seconds'] for e in self.events)
+        max_cpu_memory = max(e['end_memory_mb'] for e in self.events)
+        max_gpu_memory = max(e['peak_gpu_memory_mb'] for e in self.events)
+        total_memory_delta = sum(e['memory_delta_mb'] for e in self.events)
+        total_gpu_memory_delta = sum(e['gpu_memory_delta_mb'] for e in self.events)
+        
+        print("\n" + "="*80)
+        print("PERFORMANCE SUMMARY")
+        print("="*80)
+        
+        # 📊 EXECUTION STATISTICS
+        print(f"\n📊 EXECUTION STATISTICS")
+        print(f"{'─'*80}")
+        print(f"Total Time: {total_time:.2f}s ({total_time/60:.2f}m)")
+        print(f"Peak CPU Memory: {max_cpu_memory:.2f} MB")
+        if torch.cuda.is_available():
+            print(f"Peak GPU Memory: {max_gpu_memory:.2f} MB")
+        
+        # 📈 DETAILED BREAKDOWN
+        print(f"\n📈 DETAILED BREAKDOWN")
+        print(f"{'─'*80}")
+        if torch.cuda.is_available():
+            for event in self.events:
+                percentage = (event['time_seconds'] / total_time * 100) if total_time > 0 else 0
+                print(f"{event['name']:<20} {event['time_seconds']:<10.2f}s  {event['memory_delta_mb']:+>10.2f} MB CPU  {event['gpu_memory_delta_mb']:+>10.2f} MB GPU  {percentage:>6.1f}%")
+        else:
+            for event in self.events:
+                percentage = (event['time_seconds'] / total_time * 100) if total_time > 0 else 0
+                print(f"{event['name']:<20} {event['time_seconds']:<10.2f}s  {event['memory_delta_mb']:+>10.2f} MB CPU  {percentage:>6.1f}%")
+        
+        # ⏱️  TIMING METRICS
+        print(f"\n⏱️  TIMING METRICS")
+        print(f"{'─'*80}")
+        for i, event in enumerate(self.events, 1):
+            print(f"[{i}] {event['name']:<50} {event['time_seconds']:>10.2f}s ({event['time_seconds']/60:>8.2f}m)")
+        
+        # 💾 MEMORY METRICS
+        print(f"\n💾 MEMORY METRICS")
+        print(f"{'─'*80}")
+        print(f"Total CPU Memory Change: {total_memory_delta:+.2f} MB")
+        print(f"Average Memory per Event: {total_memory_delta/len(self.events):+.2f} MB")
+        print(f"Peak System Memory: {max_cpu_memory:.2f} MB")
+        
+        # 🔋 GPU MEMORY METRICS
+        if torch.cuda.is_available():
+            print(f"\n🔋 GPU MEMORY METRICS")
+            print(f"{'─'*80}")
+            print(f"Total GPU Memory Change: {total_gpu_memory_delta:+.2f} MB")
+            print(f"Peak GPU Memory: {max_gpu_memory:.2f} MB")
+            print(f"GPU Memory Allocated: {torch.cuda.memory_allocated()/1024/1024:.2f} MB")
+            print(f"GPU Memory Cached: {torch.cuda.memory_cached()/1024/1024:.2f} MB")
+        
+        # Final Summary
+        print(f"\n{'─'*80}")
+        print(f"✅ Execution completed in {total_time/60:.2f} minutes")
+        print(f"✅ Peak memory usage: {max_cpu_memory:.2f} MB (CPU)")
+        if torch.cuda.is_available():
+            print(f"✅ Peak GPU memory: {max_gpu_memory:.2f} MB")
+        print(f"{'─'*80}")
 
 
 def main():
+    # Initialize performance tracker
+    tracker = PerformanceTracker()
+    
     fix_seed = 2023
     random.seed(fix_seed)
     torch.manual_seed(fix_seed)
@@ -140,15 +258,24 @@ def main():
                 args.class_strategy, ii)
 
             exp = Exp_Long_Term_Forecast(args)
+            
+            # Track training
+            tracker.start('Training')
             print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
             exp.train(setting)
+            tracker.stop('Training')
 
+            # Track testing
+            tracker.start('Testing')
             print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
             exp.test(setting)
+            tracker.stop('Testing')
 
             if args.do_predict:
+                tracker.start('Predicting')
                 print('>>>>>>>predicting : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
                 exp.predict(setting, True)
+                tracker.stop('Predicting')
 
             torch.cuda.empty_cache()
 
@@ -173,40 +300,19 @@ def main():
                     _, test_loader = exp._get_data('test')
                     print("[2/4] Test data loaded")
 
-                    # ============================================================
-                    # STEP 1: PRINT ORIGINAL MODEL ANALYSIS
-                    # ============================================================
-                    print("\n" + "-"*80)
-                    print("ORIGINAL MODEL ANALYSIS")
-                    print("-"*80)
-                    quant.print_model_analysis(original_model)
-
-                    # ============================================================
-                    # STEP 2: APPLY QUANTIZATION
-                    # ============================================================
-                    print("\n" + "-"*80)
-                    print("QUANTIZATION PROCESS")
-                    print("-"*80)
-
+                    # Apply quantization
+                    print("\n[3/4] Applying quantization...")
                     if args.quantization_type == 'dynamic':
                         quantized_model = quant.quantize_model_dynamic(original_model)
                     else:
                         quantized_model = quant.quantize_model_static(original_model, test_loader)
 
-                    print("[3/4] Quantization complete")
-
-                    # ============================================================
-                    # STEP 3: PROFILE BOTH MODELS
-                    # ============================================================
-                    print("\n" + "-"*80)
-                    print("PERFORMANCE PROFILING")
-                    print("-"*80)
+                    print("[4/4] Quantization complete")
 
                     # Get a test batch for profiling
                     batch_x, batch_y, batch_x_mark, batch_y_mark = next(iter(test_loader))
 
                     # Profile original model
-                    print("\nProfiling ORIGINAL model...")
                     original_metrics = quant.profile_inference(
                         original_model,
                         batch_x, batch_x_mark,
@@ -217,7 +323,6 @@ def main():
                     )
 
                     # Profile quantized model (move to CPU for inference)
-                    print("Profiling QUANTIZED model...")
                     quantized_metrics = quant.profile_inference(
                         quantized_model,
                         batch_x, batch_x_mark,
@@ -227,71 +332,17 @@ def main():
                         num_iterations=args.profile_iterations
                     )
 
-                    print("[4/4] Profiling complete")
-
-                    # ============================================================
-                    # STEP 4: DISPLAY COMPARISON RESULTS
-                    # ============================================================
-                    print("\n" + "="*80)
-                    print("COMPREHENSIVE COMPARISON RESULTS")
-                    print("="*80)
-
-                    from utils.quantization import get_model_size, compare_models
-
-                    # Calculate metrics
-                    speedup = original_metrics['elapsed_time_per_iteration'] / quantized_metrics['elapsed_time_per_iteration']
-                    orig_size = get_model_size(original_model)
-                    quant_size = get_model_size(quantized_model)
-                    model_comparison = compare_models(original_model, quantized_model)
-
-                    # Memory improvement
-                    memory_improvement = 0
-                    if original_metrics['memory_delta_mb'] != 0:
-                        memory_improvement = ((original_metrics['memory_delta_mb'] - quantized_metrics['memory_delta_mb']) 
-                                            / abs(original_metrics['memory_delta_mb']) * 100)
-
-                    # Display results
-                    print("\n📊 TIMING ANALYSIS")
-                    print("="*80)
-                    print(f"Original Model - Time per Iteration: {original_metrics['elapsed_time_per_iteration']*1000:.4f} ms")
-                    print(f"Quantized Model - Time per Iteration: {quantized_metrics['elapsed_time_per_iteration']*1000:.4f} ms")
-                    print(f"Speedup Factor: {speedup:.2f}x")
-                    print(f"Time Savings: {(1-1/speedup)*100:.2f}%")
-
-                    print("\n💾 MEMORY ANALYSIS")
-                    print("="*80)
-                    print(f"Original Model - Memory Delta: {original_metrics['memory_delta_mb']:+.2f} MB")
-                    print(f"Quantized Model - Memory Delta: {quantized_metrics['memory_delta_mb']:+.2f} MB")
-                    print(f"Memory Improvement: {memory_improvement:.2f}%")
-
-                    if 'gpu_memory_allocated_mb' in original_metrics:
-                        print(f"\nGPU Memory (Original): {original_metrics.get('gpu_memory_allocated_mb', 0):.2f} MB")
-                        print(f"GPU Memory (Quantized): {quantized_metrics.get('gpu_memory_allocated_mb', 0):.2f} MB")
-
-                    print("\n📦 MODEL SIZE ANALYSIS")
-                    print("="*80)
-                    print(f"Original Model Size: {orig_size['total_size_mb']:.4f} MB")
-                    print(f"Quantized Model Size: {quant_size['total_size_mb']:.4f} MB")
-                    print(f"Compression Ratio: {model_comparison['compression_ratio']:.2f}x")
-                    print(f"Size Reduction: {model_comparison['size_reduction_percent']:.2f}%")
-
-                    print("\n⚡ SUMMARY")
-                    print("="*80)
-                    print(f"Quantization Type: {args.quantization_type.upper()}")
-                    print(f"Speedup: {speedup:.2f}x faster")
-                    print(f"Size: {model_comparison['compression_ratio']:.2f}x smaller")
-                    print(f"Memory: {memory_improvement:.2f}% saved")
-                    print(f"\n✅ Training + Quantization Complete!")
-                    print("="*80)
-
                     # Save quantized model
                     quant.save_quantized_model(f'./checkpoints/{setting}/quantized_model.pth')
-                    print(f"\n💾 Quantized model saved to: ./checkpoints/{setting}/quantized_model.pth")
+                    print(f"\n✅ Quantized model saved to: ./checkpoints/{setting}/quantized_model.pth")
 
                 except Exception as e:
                     print(f"\n❌ Error during quantization: {str(e)}")
                     import traceback
                     traceback.print_exc()
+        
+        # Print performance summary
+        tracker.print_summary()
 
     else:
         # Testing only mode
@@ -316,9 +367,13 @@ def main():
             args.class_strategy, ii)
 
         exp = Exp_Long_Term_Forecast(args)
+        tracker.start('Testing')
         print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
         exp.test(setting, test=1)
+        tracker.stop('Testing')
         torch.cuda.empty_cache()
+        
+        tracker.print_summary()
 
 
 if __name__ == '__main__':
