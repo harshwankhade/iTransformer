@@ -4,8 +4,92 @@ from experiments.exp_long_term_forecasting import Exp_Long_Term_Forecast
 from experiments.exp_long_term_forecasting_partial import Exp_Long_Term_Forecast_Partial
 import random
 import numpy as np
+import time
+import psutil
+import os
+from datetime import datetime
+
+
+class PerformanceTracker:
+    """Track time and memory usage during training and testing."""
+    
+    def __init__(self):
+        self.process = psutil.Process(os.getpid())
+        self.start_time = None
+        self.start_memory = None
+        self.events = []
+        
+    def start(self, event_name):
+        """Start tracking an event."""
+        self.start_time = time.time()
+        self.start_memory = self.process.memory_info().rss / 1024 / 1024  # MB
+        print(f"\n⏱️  Starting: {event_name}")
+        print(f"   Memory at start: {self.start_memory:.2f} MB")
+        
+    def stop(self, event_name):
+        """Stop tracking and record event."""
+        elapsed_time = time.time() - self.start_time
+        end_memory = self.process.memory_info().rss / 1024 / 1024  # MB
+        memory_delta = end_memory - self.start_memory
+        
+        event_info = {
+            'name': event_name,
+            'time_seconds': elapsed_time,
+            'start_memory_mb': self.start_memory,
+            'end_memory_mb': end_memory,
+            'memory_delta_mb': memory_delta,
+            'timestamp': datetime.now()
+        }
+        self.events.append(event_info)
+        
+        print(f"✅ Completed: {event_name}")
+        print(f"   Time elapsed: {elapsed_time:.2f}s ({elapsed_time/60:.2f}m)")
+        print(f"   Memory at end: {end_memory:.2f} MB")
+        print(f"   Memory change: {memory_delta:+.2f} MB")
+        
+    def print_summary(self):
+        """Print summary of all tracked events."""
+        if not self.events:
+            return
+            
+        print("\n" + "="*80)
+        print("PERFORMANCE SUMMARY")
+        print("="*80)
+        
+        total_time = sum(e['time_seconds'] for e in self.events)
+        max_memory = max(e['end_memory_mb'] for e in self.events)
+        total_memory_delta = sum(e['memory_delta_mb'] for e in self.events)
+        
+        print(f"\n📊 EXECUTION STATISTICS")
+        print(f"{'─'*80}")
+        print(f"Total Events Tracked: {len(self.events)}")
+        print(f"Total Time: {total_time:.2f}s ({total_time/60:.2f}m)")
+        print(f"Peak Memory Usage: {max_memory:.2f} MB")
+        print(f"Total Memory Delta: {total_memory_delta:+.2f} MB")
+        
+        print(f"\n📈 DETAILED BREAKDOWN")
+        print(f"{'─'*80}")
+        print(f"{'Event Name':<30} {'Time (s)':<15} {'Memory (MB)':<15} {'% of Total':<12}")
+        print(f"{'─'*80}")
+        
+        for event in self.events:
+            percentage = (event['time_seconds'] / total_time * 100) if total_time > 0 else 0
+            print(f"{event['name']:<30} {event['time_seconds']:<15.2f} {event['memory_delta_mb']:<15.2f} {percentage:<12.1f}%")
+        
+        print(f"{'─'*80}")
+        
+        # GPU memory if available
+        if torch.cuda.is_available():
+            print(f"\n🔋 GPU STATISTICS")
+            print(f"{'─'*80}")
+            print(f"GPU Memory Allocated: {torch.cuda.memory_allocated()/1024/1024:.2f} MB")
+            print(f"GPU Memory Cached: {torch.cuda.memory_cached()/1024/1024:.2f} MB")
+
 
 if __name__ == '__main__':
+    # Initialize performance tracker
+    tracker = PerformanceTracker()
+    
     fix_seed = 2023
     random.seed(fix_seed)
     torch.manual_seed(fix_seed)
@@ -128,17 +212,29 @@ if __name__ == '__main__':
                 args.class_strategy, ii)
 
             exp = Exp(args)  # set experiments
+            
+            # Track training
+            tracker.start(f'Training: {setting}')
             print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
             exp.train(setting)
+            tracker.stop(f'Training: {setting}')
 
+            # Track testing
+            tracker.start(f'Testing: {setting}')
             print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
             exp.test(setting)
+            tracker.stop(f'Testing: {setting}')
 
             if args.do_predict:
+                tracker.start(f'Predicting: {setting}')
                 print('>>>>>>>predicting : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
                 exp.predict(setting, True)
+                tracker.stop(f'Predicting: {setting}')
 
             torch.cuda.empty_cache()
+        
+        # Print performance summary
+        tracker.print_summary()
     else:
         ii = 0
         setting = '{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_{}'.format(
@@ -161,6 +257,14 @@ if __name__ == '__main__':
             args.class_strategy, ii)
 
         exp = Exp(args)  # set experiments
+        
+        # Track testing
+        tracker.start(f'Testing: {setting}')
         print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
         exp.test(setting, test=1)
+        tracker.stop(f'Testing: {setting}')
+        
         torch.cuda.empty_cache()
+        
+        # Print performance summary
+        tracker.print_summary()
