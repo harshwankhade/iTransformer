@@ -17,14 +17,23 @@ class PerformanceTracker:
         self.process = psutil.Process(os.getpid())
         self.start_time = None
         self.start_memory = None
+        self.start_gpu_memory = None
         self.events = []
         
     def start(self, event_name):
         """Start tracking an event."""
         self.start_time = time.time()
         self.start_memory = self.process.memory_info().rss / 1024 / 1024  # MB
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+            self.start_gpu_memory = torch.cuda.memory_allocated() / 1024 / 1024  # MB
+        else:
+            self.start_gpu_memory = 0
+            
         print(f"\n⏱️  Starting: {event_name}")
         print(f"   Memory at start: {self.start_memory:.2f} MB")
+        if torch.cuda.is_available():
+            print(f"   GPU Memory at start: {self.start_gpu_memory:.2f} MB")
         
     def stop(self, event_name):
         """Stop tracking and record event."""
@@ -32,20 +41,30 @@ class PerformanceTracker:
         end_memory = self.process.memory_info().rss / 1024 / 1024  # MB
         memory_delta = end_memory - self.start_memory
         
+        gpu_memory_delta = 0
+        peak_gpu_memory = 0
+        if torch.cuda.is_available():
+            current_gpu_memory = torch.cuda.memory_allocated() / 1024 / 1024
+            gpu_memory_delta = current_gpu_memory - self.start_gpu_memory
+            peak_gpu_memory = torch.cuda.max_memory_allocated() / 1024 / 1024
+        
         event_info = {
             'name': event_name,
             'time_seconds': elapsed_time,
             'start_memory_mb': self.start_memory,
             'end_memory_mb': end_memory,
             'memory_delta_mb': memory_delta,
+            'gpu_memory_delta_mb': gpu_memory_delta,
+            'peak_gpu_memory_mb': peak_gpu_memory,
             'timestamp': datetime.now()
         }
         self.events.append(event_info)
         
         print(f"✅ Completed: {event_name}")
-        print(f"   Time elapsed: {elapsed_time:.2f}s ({elapsed_time/60:.2f}m)")
-        print(f"   Memory at end: {end_memory:.2f} MB")
-        print(f"   Memory change: {memory_delta:+.2f} MB")
+        print(f"   ⏱️  Time elapsed: {elapsed_time:.2f}s ({elapsed_time/60:.2f}m)")
+        print(f"   💾 Memory at end: {end_memory:.2f} MB (Δ {memory_delta:+.2f} MB)")
+        if torch.cuda.is_available():
+            print(f"   🔋 GPU Memory: {current_gpu_memory:.2f} MB (Δ {gpu_memory_delta:+.2f} MB, Peak: {peak_gpu_memory:.2f} MB)")
         
     def print_summary(self):
         """Print summary of all tracked events."""
@@ -53,37 +72,77 @@ class PerformanceTracker:
             return
             
         print("\n" + "="*80)
-        print("PERFORMANCE SUMMARY")
+        print("COMPREHENSIVE PERFORMANCE SUMMARY")
         print("="*80)
         
         total_time = sum(e['time_seconds'] for e in self.events)
-        max_memory = max(e['end_memory_mb'] for e in self.events)
+        max_cpu_memory = max(e['end_memory_mb'] for e in self.events)
+        max_gpu_memory = max(e['peak_gpu_memory_mb'] for e in self.events)
         total_memory_delta = sum(e['memory_delta_mb'] for e in self.events)
+        total_gpu_memory_delta = sum(e['gpu_memory_delta_mb'] for e in self.events)
         
         print(f"\n📊 EXECUTION STATISTICS")
         print(f"{'─'*80}")
         print(f"Total Events Tracked: {len(self.events)}")
         print(f"Total Time: {total_time:.2f}s ({total_time/60:.2f}m)")
-        print(f"Peak Memory Usage: {max_memory:.2f} MB")
-        print(f"Total Memory Delta: {total_memory_delta:+.2f} MB")
+        print(f"Peak CPU Memory Usage: {max_cpu_memory:.2f} MB")
+        print(f"Total CPU Memory Delta: {total_memory_delta:+.2f} MB")
+        
+        if torch.cuda.is_available():
+            print(f"Peak GPU Memory Usage: {max_gpu_memory:.2f} MB")
+            print(f"Total GPU Memory Delta: {total_gpu_memory_delta:+.2f} MB")
         
         print(f"\n📈 DETAILED BREAKDOWN")
         print(f"{'─'*80}")
-        print(f"{'Event Name':<30} {'Time (s)':<15} {'Memory (MB)':<15} {'% of Total':<12}")
-        print(f"{'─'*80}")
         
-        for event in self.events:
-            percentage = (event['time_seconds'] / total_time * 100) if total_time > 0 else 0
-            print(f"{event['name']:<30} {event['time_seconds']:<15.2f} {event['memory_delta_mb']:<15.2f} {percentage:<12.1f}%")
-        
-        print(f"{'─'*80}")
-        
-        # GPU memory if available
         if torch.cuda.is_available():
-            print(f"\n🔋 GPU STATISTICS")
+            print(f"{'Event Name':<25} {'Time (s)':<12} {'CPU Mem':<12} {'GPU Mem':<12} {'% Time':<10}")
             print(f"{'─'*80}")
+            for event in self.events:
+                percentage = (event['time_seconds'] / total_time * 100) if total_time > 0 else 0
+                cpu_mem_str = f"{event['memory_delta_mb']:+.1f} MB"
+                gpu_mem_str = f"{event['gpu_memory_delta_mb']:+.1f} MB"
+                print(f"{event['name']:<25} {event['time_seconds']:<12.2f} {cpu_mem_str:<12} {gpu_mem_str:<12} {percentage:<10.1f}%")
+        else:
+            print(f"{'Event Name':<25} {'Time (s)':<12} {'CPU Mem':<12} {'% Time':<10}")
+            print(f"{'─'*80}")
+            for event in self.events:
+                percentage = (event['time_seconds'] / total_time * 100) if total_time > 0 else 0
+                cpu_mem_str = f"{event['memory_delta_mb']:+.1f} MB"
+                print(f"{event['name']:<25} {event['time_seconds']:<12.2f} {cpu_mem_str:<12} {percentage:<10.1f}%")
+        
+        print(f"{'─'*80}")
+        
+        # Timing metrics
+        print(f"\n⏱️  TIMING METRICS")
+        print(f"{'─'*80}")
+        for i, event in enumerate(self.events, 1):
+            avg_time = event['time_seconds']
+            throughput = 1.0 / (avg_time / 1.0) if avg_time > 0 else 0
+            print(f"[{i}] {event['name']:<50} {avg_time:>10.2f}s ({avg_time/60:>8.2f}m)")
+        
+        print(f"\n💾 MEMORY METRICS")
+        print(f"{'─'*80}")
+        print(f"Total CPU Memory Change: {total_memory_delta:+.2f} MB")
+        print(f"Average Memory per Event: {total_memory_delta/len(self.events):+.2f} MB")
+        print(f"Peak System Memory: {max_cpu_memory:.2f} MB")
+        
+        if torch.cuda.is_available():
+            print(f"\n🔋 GPU MEMORY METRICS")
+            print(f"{'─'*80}")
+            print(f"Total GPU Memory Change: {total_gpu_memory_delta:+.2f} MB")
+            print(f"Average GPU Memory per Event: {total_gpu_memory_delta/len(self.events):+.2f} MB")
+            print(f"Peak GPU Memory: {max_gpu_memory:.2f} MB")
             print(f"GPU Memory Allocated: {torch.cuda.memory_allocated()/1024/1024:.2f} MB")
             print(f"GPU Memory Cached: {torch.cuda.memory_cached()/1024/1024:.2f} MB")
+        
+        print(f"\n📋 SUMMARY")
+        print(f"{'─'*80}")
+        print(f"✅ Execution completed in {total_time/60:.2f} minutes")
+        print(f"✅ Peak memory usage: {max_cpu_memory:.2f} MB (CPU)")
+        if torch.cuda.is_available():
+            print(f"✅ Peak GPU memory: {max_gpu_memory:.2f} MB")
+        print(f"{'─'*80}")
 
 
 if __name__ == '__main__':
