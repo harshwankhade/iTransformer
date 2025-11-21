@@ -294,43 +294,95 @@ def main():
 
                     # Get original model
                     original_model = exp.model
-                    print("\n[1/4] Original model loaded")
+                    print("\n[1/5] Original model loaded")
 
                     # Get test data for profiling
                     _, test_loader = exp._get_data('test')
-                    print("[2/4] Test data loaded")
+                    print("[2/5] Test data loaded")
 
-                    # Apply quantization
-                    print("\n[3/4] Applying quantization...")
+                    # ==========================================
+                    # STEP 1: BENCHMARK ORIGINAL MODEL INFERENCE
+                    # ==========================================
+                    print("\n[3/5] Profiling ORIGINAL model inference...")
+                    tracker.start('Original Model Inference')
+                    
+                    # Get a test batch for profiling
+                    batch_x, batch_y, batch_x_mark, batch_y_mark = next(iter(test_loader))
+                    
+                    original_times = []
+                    with torch.no_grad():
+                        for _ in range(args.profile_iterations):
+                            torch.cuda.synchronize() if torch.cuda.is_available() else None
+                            start = time.time()
+                            
+                            outputs = original_model(batch_x.to(device), batch_x_mark.to(device),
+                                                   torch.zeros_like(batch_y[:, -args.pred_len:, :]).to(device),
+                                                   batch_y_mark.to(device))
+                            
+                            torch.cuda.synchronize() if torch.cuda.is_available() else None
+                            elapsed = time.time() - start
+                            original_times.append(elapsed)
+                    
+                    tracker.stop('Original Model Inference')
+                    
+                    avg_original_time = np.mean(original_times) * 1000  # Convert to ms
+                    print(f"✅ Original Model Inference: {avg_original_time:.4f} ms/iter")
+
+                    # ==========================================
+                    # STEP 2: APPLY QUANTIZATION
+                    # ==========================================
+                    print("\n[4/5] Applying quantization...")
+                    tracker.start('Quantization')
+                    
                     if args.quantization_type == 'dynamic':
                         quantized_model = quant.quantize_model_dynamic(original_model)
                     else:
                         quantized_model = quant.quantize_model_static(original_model, test_loader)
+                    
+                    tracker.stop('Quantization')
+                    print("✅ Quantization complete")
 
-                    print("[4/4] Quantization complete")
+                    # ==========================================
+                    # STEP 3: BENCHMARK QUANTIZED MODEL INFERENCE
+                    # ==========================================
+                    print("\n[5/5] Profiling QUANTIZED model inference...")
+                    tracker.start('Quantized Model Inference')
+                    
+                    quantized_times = []
+                    with torch.no_grad():
+                        for _ in range(args.profile_iterations):
+                            torch.cuda.synchronize() if torch.cuda.is_available() else None
+                            start = time.time()
+                            
+                            outputs = quantized_model(batch_x.to('cpu'), batch_x_mark.to('cpu'),
+                                                    torch.zeros_like(batch_y[:, -args.pred_len:, :]).to('cpu'),
+                                                    batch_y_mark.to('cpu'))
+                            
+                            torch.cuda.synchronize() if torch.cuda.is_available() else None
+                            elapsed = time.time() - start
+                            quantized_times.append(elapsed)
+                    
+                    tracker.stop('Quantized Model Inference')
+                    
+                    avg_quantized_time = np.mean(quantized_times) * 1000  # Convert to ms
+                    print(f"✅ Quantized Model Inference: {avg_quantized_time:.4f} ms/iter")
 
-                    # Get a test batch for profiling
-                    batch_x, batch_y, batch_x_mark, batch_y_mark = next(iter(test_loader))
+                    # ==========================================
+                    # STEP 4: SHOW SPEEDUP COMPARISON
+                    # ==========================================
+                    speedup = avg_original_time / avg_quantized_time
+                    time_savings = (1 - avg_quantized_time / avg_original_time) * 100
 
-                    # Profile original model
-                    original_metrics = quant.profile_inference(
-                        original_model,
-                        batch_x, batch_x_mark,
-                        torch.zeros_like(batch_y[:, -args.pred_len:, :]),
-                        batch_y_mark,
-                        device=str(device),
-                        num_iterations=args.profile_iterations
-                    )
-
-                    # Profile quantized model (move to CPU for inference)
-                    quantized_metrics = quant.profile_inference(
-                        quantized_model,
-                        batch_x, batch_x_mark,
-                        torch.zeros_like(batch_y[:, -args.pred_len:, :]),
-                        batch_y_mark,
-                        device='cpu',
-                        num_iterations=args.profile_iterations
-                    )
+                    print("\n" + "="*80)
+                    print("INFERENCE SPEEDUP COMPARISON")
+                    print("="*80)
+                    print(f"\n⚡ SPEEDUP METRICS")
+                    print(f"{'─'*80}")
+                    print(f"Original Model Inference:  {avg_original_time:.4f} ms/iteration")
+                    print(f"Quantized Model Inference: {avg_quantized_time:.4f} ms/iteration")
+                    print(f"Speedup Factor: {speedup:.2f}x")
+                    print(f"Time Savings: {time_savings:.2f}%")
+                    print(f"{'─'*80}")
 
                     # Save quantized model
                     quant.save_quantized_model(f'./checkpoints/{setting}/quantized_model.pth')
