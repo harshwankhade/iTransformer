@@ -309,6 +309,12 @@ def main():
                     # Get a test batch for profiling
                     batch_x, batch_y, batch_x_mark, batch_y_mark = next(iter(test_loader))
                     
+                    # Convert to correct dtype (float32 to match model weights)
+                    batch_x = batch_x.float()
+                    batch_y = batch_y.float()
+                    batch_x_mark = batch_x_mark.float()
+                    batch_y_mark = batch_y_mark.float()
+                    
                     original_times = []
                     with torch.no_grad():
                         for _ in range(args.profile_iterations):
@@ -354,9 +360,10 @@ def main():
                             torch.cuda.synchronize() if torch.cuda.is_available() else None
                             start = time.time()
                             
-                            outputs = quantized_model(batch_x.to('cpu'), batch_x_mark.to('cpu'),
-                                                    torch.zeros_like(batch_y[:, -args.pred_len:, :]).to('cpu'),
-                                                    batch_y_mark.to('cpu'))
+                            # Convert to float and move to CPU for quantized inference
+                            outputs = quantized_model(batch_x.float().to('cpu'), batch_x_mark.float().to('cpu'),
+                                                    torch.zeros_like(batch_y[:, -args.pred_len:, :]).float().to('cpu'),
+                                                    batch_y_mark.float().to('cpu'))
                             
                             torch.cuda.synchronize() if torch.cuda.is_available() else None
                             elapsed = time.time() - start
