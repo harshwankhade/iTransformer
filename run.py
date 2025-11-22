@@ -2,7 +2,6 @@ import argparse
 import torch
 from experiments.exp_long_term_forecasting import Exp_Long_Term_Forecast
 from experiments.exp_long_term_forecasting_partial import Exp_Long_Term_Forecast_Partial
-from utils.model_pruning import MagnitudePruning, PruningAnalyzer
 import random
 import numpy as np
 import time
@@ -73,76 +72,32 @@ class PerformanceTracker:
             return
             
         print("\n" + "="*80)
-        print("COMPREHENSIVE PERFORMANCE SUMMARY")
+        print("PERFORMANCE SUMMARY")
         print("="*80)
         
+        # Calculate metrics
         total_time = sum(e['time_seconds'] for e in self.events)
         max_cpu_memory = max(e['end_memory_mb'] for e in self.events)
         max_gpu_memory = max(e['peak_gpu_memory_mb'] for e in self.events)
         total_memory_delta = sum(e['memory_delta_mb'] for e in self.events)
-        total_gpu_memory_delta = sum(e['gpu_memory_delta_mb'] for e in self.events)
+        avg_memory_per_event = total_memory_delta / len(self.events)
         
-        print(f"\n📊 EXECUTION STATISTICS")
+        # Find training and testing times
+        training_time = sum(e['time_seconds'] for e in self.events if 'Training' in e['name'])
+        testing_time = sum(e['time_seconds'] for e in self.events if 'Testing' in e['name'])
+        
+        print(f"\n⏱️  TIME METRICS")
         print(f"{'─'*80}")
-        print(f"Total Events Tracked: {len(self.events)}")
+        print(f"Total Training Time: {training_time:.2f}s ({training_time/60:.2f}m)")
+        print(f"Total Testing Time: {testing_time:.2f}s ({testing_time/60:.2f}m)")
         print(f"Total Time: {total_time:.2f}s ({total_time/60:.2f}m)")
-        print(f"Peak CPU Memory Usage: {max_cpu_memory:.2f} MB")
-        print(f"Total CPU Memory Delta: {total_memory_delta:+.2f} MB")
         
+        print(f"\n� MEMORY METRICS")
+        print(f"{'─'*80}")
+        print(f"Peak CPU Memory: {max_cpu_memory:.2f} MB")
         if torch.cuda.is_available():
-            print(f"Peak GPU Memory Usage: {max_gpu_memory:.2f} MB")
-            print(f"Total GPU Memory Delta: {total_gpu_memory_delta:+.2f} MB")
-        
-        print(f"\n📈 DETAILED BREAKDOWN")
-        print(f"{'─'*80}")
-        
-        if torch.cuda.is_available():
-            print(f"{'Event Name':<25} {'Time (s)':<12} {'CPU Mem':<12} {'GPU Mem':<12} {'% Time':<10}")
-            print(f"{'─'*80}")
-            for event in self.events:
-                percentage = (event['time_seconds'] / total_time * 100) if total_time > 0 else 0
-                cpu_mem_str = f"{event['memory_delta_mb']:+.1f} MB"
-                gpu_mem_str = f"{event['gpu_memory_delta_mb']:+.1f} MB"
-                print(f"{event['name']:<25} {event['time_seconds']:<12.2f} {cpu_mem_str:<12} {gpu_mem_str:<12} {percentage:<10.1f}%")
-        else:
-            print(f"{'Event Name':<25} {'Time (s)':<12} {'CPU Mem':<12} {'% Time':<10}")
-            print(f"{'─'*80}")
-            for event in self.events:
-                percentage = (event['time_seconds'] / total_time * 100) if total_time > 0 else 0
-                cpu_mem_str = f"{event['memory_delta_mb']:+.1f} MB"
-                print(f"{event['name']:<25} {event['time_seconds']:<12.2f} {cpu_mem_str:<12} {percentage:<10.1f}%")
-        
-        print(f"{'─'*80}")
-        
-        # Timing metrics
-        print(f"\n⏱️  TIMING METRICS")
-        print(f"{'─'*80}")
-        for i, event in enumerate(self.events, 1):
-            avg_time = event['time_seconds']
-            throughput = 1.0 / (avg_time / 1.0) if avg_time > 0 else 0
-            print(f"[{i}] {event['name']:<50} {avg_time:>10.2f}s ({avg_time/60:>8.2f}m)")
-        
-        print(f"\n💾 MEMORY METRICS")
-        print(f"{'─'*80}")
-        print(f"Total CPU Memory Change: {total_memory_delta:+.2f} MB")
-        print(f"Average Memory per Event: {total_memory_delta/len(self.events):+.2f} MB")
-        print(f"Peak System Memory: {max_cpu_memory:.2f} MB")
-        
-        if torch.cuda.is_available():
-            print(f"\n🔋 GPU MEMORY METRICS")
-            print(f"{'─'*80}")
-            print(f"Total GPU Memory Change: {total_gpu_memory_delta:+.2f} MB")
-            print(f"Average GPU Memory per Event: {total_gpu_memory_delta/len(self.events):+.2f} MB")
             print(f"Peak GPU Memory: {max_gpu_memory:.2f} MB")
-            print(f"GPU Memory Allocated: {torch.cuda.memory_allocated()/1024/1024:.2f} MB")
-            print(f"GPU Memory Cached: {torch.cuda.memory_cached()/1024/1024:.2f} MB")
-        
-        print(f"\n📋 SUMMARY")
-        print(f"{'─'*80}")
-        print(f"✅ Execution completed in {total_time/60:.2f} minutes")
-        print(f"✅ Peak memory usage: {max_cpu_memory:.2f} MB (CPU)")
-        if torch.cuda.is_available():
-            print(f"✅ Peak GPU memory: {max_gpu_memory:.2f} MB")
+        print(f"Average Memory per Event: {avg_memory_per_event:+.2f} MB")
         print(f"{'─'*80}")
 
 
@@ -217,11 +172,6 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', type=int, default=0, help='gpu')
     parser.add_argument('--use_multi_gpu', action='store_true', help='use multiple gpus', default=False)
     parser.add_argument('--devices', type=str, default='0,1,2,3', help='device ids of multile gpus')
-
-    # Optimization options
-    parser.add_argument('--apply_optimization', type=int, default=0, help='apply model optimization (pruning)')
-    parser.add_argument('--pruning_ratio', type=float, default=0.3, help='ratio of weights to prune')
-    parser.add_argument('--pruning_strategy', type=str, default='magnitude', choices=['magnitude', 'structured'], help='pruning strategy')
 
     # iTransformer
     parser.add_argument('--exp_name', type=str, required=False, default='MTSF',
@@ -347,142 +297,6 @@ if __name__ == '__main__':
             print(f"Model Size: {model_size:.2f} MB")
             print(f"Memory per Parameter: {model_size / (param_count / 1e6):.2f} bytes/param")
             print(f"{'─'*80}")
-
-            # Apply optimization if enabled
-            if args.apply_optimization:
-                print("\n" + "="*80)
-                print("APPLYING MODEL OPTIMIZATION")
-                print("="*80)
-                
-                tracker.start('Model Optimization')
-                
-                # Get original model stats
-                original_stats = PruningAnalyzer.analyze_model_size(exp.model)
-                print(f"\n📊 ORIGINAL MODEL:")
-                print(f"   Parameters: {original_stats['total_params']:,}")
-                print(f"   Size: {original_stats['model_size_mb']:.2f} MB")
-                
-                # Benchmark ORIGINAL model inference speed
-                print("\n⚡ Benchmarking ORIGINAL model inference speed...")
-                exp.model.eval()
-                device = torch.device('cuda' if args.use_gpu else 'cpu')
-                dummy_input = torch.randn(args.batch_size, args.seq_len, exp.model.enc_in).to(device)
-                
-                # Warm-up
-                for _ in range(10):
-                    with torch.no_grad():
-                        _ = exp.model(dummy_input, None, None, None)
-                
-                # Benchmark
-                num_iterations = 100
-                if torch.cuda.is_available() and args.use_gpu:
-                    torch.cuda.synchronize()
-                    start_time = time.time()
-                    for _ in range(num_iterations):
-                        with torch.no_grad():
-                            _ = exp.model(dummy_input, None, None, None)
-                    torch.cuda.synchronize()
-                    original_time = time.time() - start_time
-                else:
-                    start_time = time.time()
-                    for _ in range(num_iterations):
-                        with torch.no_grad():
-                            _ = exp.model(dummy_input, None, None, None)
-                    original_time = time.time() - start_time
-                
-                original_avg_time = (original_time / num_iterations) * 1000  # ms
-                print(f"   Average Inference Time: {original_avg_time:.4f} ms/iteration")
-                
-                # Apply pruning
-                print(f"\n🔧 Applying {args.pruning_strategy} pruning ({args.pruning_ratio*100:.0f}%)...")
-                if args.pruning_strategy == 'magnitude':
-                    exp.model = MagnitudePruning.prune_model(
-                        exp.model,
-                        pruning_ratio=args.pruning_ratio,
-                        structured=False
-                    )
-                else:
-                    exp.model = MagnitudePruning.prune_model(
-                        exp.model,
-                        pruning_ratio=args.pruning_ratio,
-                        structured=True
-                    )
-                
-                # Get pruned model stats
-                pruned_stats = PruningAnalyzer.analyze_model_size(exp.model)
-                print(f"\n📊 OPTIMIZED MODEL:")
-                print(f"   Parameters: {pruned_stats['total_params']:,}")
-                print(f"   Size: {pruned_stats['model_size_mb']:.2f} MB")
-                
-                # Benchmark OPTIMIZED model inference speed
-                print("\n⚡ Benchmarking OPTIMIZED model inference speed...")
-                exp.model.eval()
-                exp.model.to(device)
-                
-                # Warm-up
-                for _ in range(10):
-                    with torch.no_grad():
-                        _ = exp.model(dummy_input, None, None, None)
-                
-                # Benchmark
-                if torch.cuda.is_available() and args.use_gpu:
-                    torch.cuda.synchronize()
-                    start_time = time.time()
-                    for _ in range(num_iterations):
-                        with torch.no_grad():
-                            _ = exp.model(dummy_input, None, None, None)
-                    torch.cuda.synchronize()
-                    optimized_time = time.time() - start_time
-                else:
-                    start_time = time.time()
-                    for _ in range(num_iterations):
-                        with torch.no_grad():
-                            _ = exp.model(dummy_input, None, None, None)
-                    optimized_time = time.time() - start_time
-                
-                optimized_avg_time = (optimized_time / num_iterations) * 1000  # ms
-                print(f"   Average Inference Time: {optimized_avg_time:.4f} ms/iteration")
-                
-                # Calculate metrics
-                compression = original_stats['total_params'] / pruned_stats['total_params']
-                size_reduction = (1 - pruned_stats['model_size_mb'] / original_stats['model_size_mb']) * 100
-                speedup = original_avg_time / optimized_avg_time
-                time_savings = (1 - optimized_avg_time / original_avg_time) * 100
-                
-                # Print comprehensive comparison
-                print("\n" + "="*80)
-                print("INFERENCE SPEEDUP COMPARISON")
-                print("="*80)
-                
-                print(f"\n⚡ SPEEDUP METRICS")
-                print(f"{'─'*80}")
-                print(f"Original Model Inference:  {original_avg_time:.4f} ms/iteration")
-                print(f"Optimized Model Inference: {optimized_avg_time:.4f} ms/iteration")
-                print(f"Speedup Factor: {speedup:.2f}x")
-                print(f"Time Savings: {time_savings:.2f}%")
-                print(f"{'─'*80}")
-                
-                print(f"\n📦 MODEL SIZE COMPARISON")
-                print(f"{'─'*80}")
-                print(f"Original Model Size: {original_stats['model_size_mb']:.2f} MB")
-                print(f"Optimized Model Size: {pruned_stats['model_size_mb']:.2f} MB")
-                print(f"Compression Ratio: {compression:.2f}x")
-                print(f"Size Reduction: {size_reduction:.2f}%")
-                print(f"{'─'*80}")
-                
-                print(f"\n✅ OVERALL OPTIMIZATION SUMMARY")
-                print(f"{'─'*80}")
-                print(f"Parameters Reduced: {(original_stats['total_params'] - pruned_stats['total_params']):,}")
-                print(f"Memory Saved: {(original_stats['model_size_mb'] - pruned_stats['model_size_mb']):.2f} MB")
-                print(f"Inference Speed Improvement: {speedup:.2f}x faster")
-                print(f"{'─'*80}")
-                
-                tracker.stop('Model Optimization')
-                
-                # Save optimized model
-                model_path = f'./checkpoints/{setting}/optimized_model.pth'
-                torch.save(exp.model.state_dict(), model_path)
-                print(f"\n💾 Optimized model saved to: {model_path}")
 
             if args.do_predict:
                 tracker.start(f'Predicting: {setting}')
