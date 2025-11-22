@@ -249,7 +249,7 @@ if __name__ == '__main__':
             print("\n🔥 Warming up model...")
             exp.model.eval()
             device = torch.device('cuda' if args.use_gpu else 'cpu')
-            dummy_input = torch.randn(args.batch_size, args.seq_len, exp.model.enc_in).to(device)
+            dummy_input = torch.randn(args.batch_size, args.seq_len, args.enc_in).to(device)
             
             for _ in range(10):
                 with torch.no_grad():
