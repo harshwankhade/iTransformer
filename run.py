@@ -82,7 +82,7 @@ class PerformanceTracker:
         print(f"Total Time: {total_time:.2f}s ({total_time/60:.2f}m)")
         
         print(f"\nMEMORY METRICS")
-        print(f"Average Memory per Event: {avg_memory_per_event:+.2f} MB")
+        print(f"Average Memory per Event: {avg_memory_per_event:.2f} MB")
 
 
 if __name__ == '__main__':

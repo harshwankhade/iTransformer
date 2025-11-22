@@ -72,9 +72,9 @@ class PerformanceTracker:
         total_memory_delta = sum(e['memory_delta_mb'] for e in self.events)
         total_gpu_memory_delta = sum(e['gpu_memory_delta_mb'] for e in self.events)
         
-        print("\n" + "="*80)
-        print("PERFORMANCE SUMMARY")
-        print("="*80)
+        
+
+        
         
         #  EXECUTION STATISTICS
 
@@ -90,7 +90,7 @@ class PerformanceTracker:
         print(f"\nMEMORY METRICS")
 
         
-        print(f"Average Memory per Event: {total_memory_delta/len(self.events):+.2f} MB")
+        print(f"Average Memory per Event: {total_memory_delta/len(self.events):.2f} MB")
        
         
 

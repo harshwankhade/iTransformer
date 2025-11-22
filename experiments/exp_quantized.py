@@ -45,9 +45,7 @@ class Exp_Quantized_Long_Term_Forecast:
         Returns:
             Quantized model
         """
-        print("\n" + "="*60)
-        print("APPLYING DYNAMIC QUANTIZATION")
-        print("="*60)
+
         
         self.original_model = model
         
@@ -69,7 +67,7 @@ class Exp_Quantized_Long_Term_Forecast:
         comparison = compare_models(model, self.quantized_model)
         print(f"\nCompression Ratio: {comparison['compression_ratio']:.2f}x")
         print(f"Size Reduction: {comparison['size_reduction_percent']:.2f}%")
-        print("="*60 + "\n")
+        
         
         return self.quantized_model
     
@@ -85,9 +83,7 @@ class Exp_Quantized_Long_Term_Forecast:
         Returns:
             Quantized model
         """
-        print("\n" + "="*60)
-        print("APPLYING STATIC QUANTIZATION")
-        print("="*60)
+
         
         self.original_model = model
         
@@ -121,7 +117,7 @@ class Exp_Quantized_Long_Term_Forecast:
         comparison = compare_models(model, self.quantized_model)
         print(f"\nCompression Ratio: {comparison['compression_ratio']:.2f}x")
         print(f"Size Reduction: {comparison['size_reduction_percent']:.2f}%")
-        print("="*60 + "\n")
+       
         
         return self.quantized_model
     
