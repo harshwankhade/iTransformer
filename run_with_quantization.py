@@ -76,56 +76,23 @@ class PerformanceTracker:
         print("PERFORMANCE SUMMARY")
         print("="*80)
         
-        # 📊 EXECUTION STATISTICS
-        print(f"\n📊 EXECUTION STATISTICS")
-        print(f"{'─'*80}")
+        #  EXECUTION STATISTICS
+
         print(f"Total Time: {total_time:.2f}s ({total_time/60:.2f}m)")
-        print(f"Peak CPU Memory: {max_cpu_memory:.2f} MB")
-        if torch.cuda.is_available():
-            print(f"Peak GPU Memory: {max_gpu_memory:.2f} MB")
         
-        # 📈 DETAILED BREAKDOWN
-        print(f"\n📈 DETAILED BREAKDOWN")
-        print(f"{'─'*80}")
-        if torch.cuda.is_available():
-            for event in self.events:
-                percentage = (event['time_seconds'] / total_time * 100) if total_time > 0 else 0
-                print(f"{event['name']:<20} {event['time_seconds']:<10.2f}s  {event['memory_delta_mb']:+>10.2f} MB CPU  {event['gpu_memory_delta_mb']:+>10.2f} MB GPU  {percentage:>6.1f}%")
-        else:
-            for event in self.events:
-                percentage = (event['time_seconds'] / total_time * 100) if total_time > 0 else 0
-                print(f"{event['name']:<20} {event['time_seconds']:<10.2f}s  {event['memory_delta_mb']:+>10.2f} MB CPU  {percentage:>6.1f}%")
         
-        # ⏱️  TIMING METRICS
-        print(f"\n⏱️  TIMING METRICS")
-        print(f"{'─'*80}")
+        #   TIMING METRICS
+        print(f"\n  TIMING METRICS")
         for i, event in enumerate(self.events, 1):
             print(f"[{i}] {event['name']:<50} {event['time_seconds']:>10.2f}s ({event['time_seconds']/60:>8.2f}m)")
         
-        # 💾 MEMORY METRICS
-        print(f"\n💾 MEMORY METRICS")
-        print(f"{'─'*80}")
-        print(f"Total CPU Memory Change: {total_memory_delta:+.2f} MB")
-        print(f"Average Memory per Event: {total_memory_delta/len(self.events):+.2f} MB")
-        print(f"Peak System Memory: {max_cpu_memory:.2f} MB")
-        
-        # 🔋 GPU MEMORY METRICS
-        if torch.cuda.is_available():
-            print(f"\n🔋 GPU MEMORY METRICS")
-            print(f"{'─'*80}")
-            print(f"Total GPU Memory Change: {total_gpu_memory_delta:+.2f} MB")
-            print(f"Peak GPU Memory: {max_gpu_memory:.2f} MB")
-            print(f"GPU Memory Allocated: {torch.cuda.memory_allocated()/1024/1024:.2f} MB")
-            print(f"GPU Memory Cached: {torch.cuda.memory_cached()/1024/1024:.2f} MB")
-        
-        # Final Summary
-        print(f"\n{'─'*80}")
-        print(f"✅ Execution completed in {total_time/60:.2f} minutes")
-        print(f"✅ Peak memory usage: {max_cpu_memory:.2f} MB (CPU)")
-        if torch.cuda.is_available():
-            print(f"✅ Peak GPU memory: {max_gpu_memory:.2f} MB")
-        print(f"{'─'*80}")
+        #  MEMORY METRICS
+        print(f"\nMEMORY METRICS")
 
+        
+        print(f"Average Memory per Event: {total_memory_delta/len(self.events):+.2f} MB")
+       
+        
 
 def main():
     # Initialize performance tracker
@@ -228,12 +195,12 @@ def main():
     print('Args in experiment:')
     print(args)
 
-    # =====================================================================
+    
     # PHASE 1: TRAINING
-    # =====================================================================
-    print("\n" + "="*80)
-    print("PHASE 1: MODEL TRAINING")
-    print("="*80)
+    
+
+    print("MODEL TRAINING")
+
 
     if args.is_training:
         for ii in range(args.itr):
@@ -279,13 +246,13 @@ def main():
 
             torch.cuda.empty_cache()
 
-            # ================================================================
+           
             # PHASE 2: QUANTIZATION AND PROFILING
-            # ================================================================
+            
             if args.apply_quantization:
-                print("\n" + "="*80)
+                
                 print("PHASE 2: QUANTIZATION AND PROFILING")
-                print("="*80)
+                
 
                 try:
                     # Initialize quantization helper
@@ -300,9 +267,9 @@ def main():
                     _, test_loader = exp._get_data('test')
                     print("[2/5] Test data loaded")
 
-                    # ==========================================
+                    
                     # STEP 1: BENCHMARK ORIGINAL MODEL INFERENCE ON CPU
-                    # ==========================================
+                    
                     print("\n[3/5] Profiling ORIGINAL model inference...")
                     tracker.start('Original Model Inference')
                     
@@ -334,11 +301,11 @@ def main():
                     tracker.stop('Original Model Inference')
                     
                     avg_original_time = np.mean(original_times) * 1000  # Convert to ms
-                    print(f"✅ Original Model Inference (CPU): {avg_original_time:.4f} ms/iter")
+                    print(f" Original Model Inference (CPU): {avg_original_time:.4f} ms/iter")
 
-                    # ==========================================
+                   
                     # STEP 2: APPLY QUANTIZATION
-                    # ==========================================
+                    
                     print("\n[4/5] Applying quantization...")
                     tracker.start('Quantization')
                     
@@ -348,11 +315,11 @@ def main():
                         quantized_model = quant.quantize_model_static(original_model_cpu, test_loader)
                     
                     tracker.stop('Quantization')
-                    print("✅ Quantization complete")
+                    print(" Quantization complete")
 
-                    # ==========================================
+                    
                     # STEP 3: BENCHMARK QUANTIZED MODEL INFERENCE ON CPU
-                    # ==========================================
+                    
                     print("\n[5/5] Profiling QUANTIZED model inference...")
                     tracker.start('Quantized Model Inference')
                     
@@ -372,43 +339,42 @@ def main():
                     tracker.stop('Quantized Model Inference')
                     
                     avg_quantized_time = np.mean(quantized_times) * 1000  # Convert to ms
-                    print(f"✅ Quantized Model Inference (CPU): {avg_quantized_time:.4f} ms/iter")
+                    print(f"Quantized Model Inference (CPU): {avg_quantized_time:.4f} ms/iter")
 
-                    # ==========================================
+                    
                     # STEP 4: SHOW SPEEDUP COMPARISON
-                    # ==========================================
+                    
                     speedup = avg_original_time / avg_quantized_time
                     time_savings = (1 - avg_quantized_time / avg_original_time) * 100
 
-                    print("\n" + "="*80)
-                    print("INFERENCE SPEEDUP COMPARISON (CPU vs CPU)")
-                    print("="*80)
-                    print(f"\n⚡ SPEEDUP METRICS")
-                    print(f"{'─'*80}")
+                   
+                   
+                    print(f"\n SPEEDUP METRICS")
+                   
                     print(f"Original Model Inference (CPU):  {avg_original_time:.4f} ms/iteration")
                     print(f"Quantized Model Inference (CPU): {avg_quantized_time:.4f} ms/iteration")
                     print(f"Speedup Factor: {speedup:.2f}x")
                     print(f"Time Savings: {time_savings:.2f}%")
-                    print(f"{'─'*80}")
+                    
 
                     # Get model sizes
                     original_size = sum(p.numel() * p.element_size() for p in original_model_cpu.parameters()) / 1024 / 1024
                     quantized_size = sum(p.numel() * p.element_size() for p in quantized_model.parameters()) / 1024 / 1024
                     
-                    print(f"\n📦 MODEL SIZE COMPARISON")
-                    print(f"{'─'*80}")
+                    print(f"\nMODEL SIZE COMPARISON")
+                    
                     print(f"Original Model Size: {original_size:.2f} MB")
                     print(f"Quantized Model Size: {quantized_size:.2f} MB")
                     print(f"Compression Ratio: {original_size/quantized_size:.2f}x")
                     print(f"Size Reduction: {(1 - quantized_size/original_size)*100:.2f}%")
-                    print(f"{'─'*80}")
+                   
 
                     # Save quantized model
                     quant.save_quantized_model(f'./checkpoints/{setting}/quantized_model.pth')
-                    print(f"\n✅ Quantized model saved to: ./checkpoints/{setting}/quantized_model.pth")
+                    print(f"\nQuantized model saved to: ./checkpoints/{setting}/quantized_model.pth")
 
                 except Exception as e:
-                    print(f"\n❌ Error during quantization: {str(e)}")
+                    print(f"\nError during quantization: {str(e)}")
                     import traceback
                     traceback.print_exc()
         

@@ -30,10 +30,7 @@ class PerformanceTracker:
         else:
             self.start_gpu_memory = 0
             
-        print(f"\n⏱️  Starting: {event_name}")
-        print(f"   Memory at start: {self.start_memory:.2f} MB")
-        if torch.cuda.is_available():
-            print(f"   GPU Memory at start: {self.start_gpu_memory:.2f} MB")
+        print(f"\nStarting: {event_name}")
         
     def stop(self, event_name):
         """Stop tracking and record event."""
@@ -60,25 +57,18 @@ class PerformanceTracker:
         }
         self.events.append(event_info)
         
-        print(f"✅ Completed: {event_name}")
-        print(f"   ⏱️  Time elapsed: {elapsed_time:.2f}s ({elapsed_time/60:.2f}m)")
-        print(f"   💾 Memory at end: {end_memory:.2f} MB (Δ {memory_delta:+.2f} MB)")
-        if torch.cuda.is_available():
-            print(f"   🔋 GPU Memory: {current_gpu_memory:.2f} MB (Δ {gpu_memory_delta:+.2f} MB, Peak: {peak_gpu_memory:.2f} MB)")
+        print(f"Completed: {event_name}")
+        print(f"   Time elapsed: {elapsed_time:.2f}s ({elapsed_time/60:.2f}m)")
         
     def print_summary(self):
         """Print summary of all tracked events."""
         if not self.events:
             return
             
-        print("\n" + "="*80)
-        print("PERFORMANCE SUMMARY")
-        print("="*80)
+        print("\nPERFORMANCE SUMMARY")
         
         # Calculate metrics
         total_time = sum(e['time_seconds'] for e in self.events)
-        max_cpu_memory = max(e['end_memory_mb'] for e in self.events)
-        max_gpu_memory = max(e['peak_gpu_memory_mb'] for e in self.events)
         total_memory_delta = sum(e['memory_delta_mb'] for e in self.events)
         avg_memory_per_event = total_memory_delta / len(self.events)
         
@@ -86,19 +76,13 @@ class PerformanceTracker:
         training_time = sum(e['time_seconds'] for e in self.events if 'Training' in e['name'])
         testing_time = sum(e['time_seconds'] for e in self.events if 'Testing' in e['name'])
         
-        print(f"\n⏱️  TIME METRICS")
-        print(f"{'─'*80}")
+        print(f"\nTIME METRICS")
         print(f"Total Training Time: {training_time:.2f}s ({training_time/60:.2f}m)")
         print(f"Total Testing Time: {testing_time:.2f}s ({testing_time/60:.2f}m)")
         print(f"Total Time: {total_time:.2f}s ({total_time/60:.2f}m)")
         
-        print(f"\n� MEMORY METRICS")
-        print(f"{'─'*80}")
-        print(f"Peak CPU Memory: {max_cpu_memory:.2f} MB")
-        if torch.cuda.is_available():
-            print(f"Peak GPU Memory: {max_gpu_memory:.2f} MB")
+        print(f"\nMEMORY METRICS")
         print(f"Average Memory per Event: {avg_memory_per_event:+.2f} MB")
-        print(f"{'─'*80}")
 
 
 if __name__ == '__main__':
@@ -239,64 +223,6 @@ if __name__ == '__main__':
             print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
             test_results = exp.test(setting)
             tracker.stop(f'Testing: {setting}')
-            
-            # Inference speed benchmarking
-            print("\n" + "="*80)
-            print("INFERENCE SPEEDUP METRICS")
-            print("="*80)
-            
-            # Warm-up runs
-            print("\n🔥 Warming up model...")
-            exp.model.eval()
-            device = torch.device('cuda' if args.use_gpu else 'cpu')
-            dummy_input = torch.randn(args.batch_size, args.seq_len, args.enc_in).to(device)
-            
-            for _ in range(10):
-                with torch.no_grad():
-                    _ = exp.model(dummy_input, None, None, None)
-            
-            # Benchmark inference speed
-            print("⚡ Benchmarking inference speed...")
-            num_iterations = 100
-            
-            if torch.cuda.is_available() and args.use_gpu:
-                torch.cuda.synchronize()
-                start_time = time.time()
-                for _ in range(num_iterations):
-                    with torch.no_grad():
-                        _ = exp.model(dummy_input, None, None, None)
-                torch.cuda.synchronize()
-                elapsed_time = time.time() - start_time
-            else:
-                start_time = time.time()
-                for _ in range(num_iterations):
-                    with torch.no_grad():
-                        _ = exp.model(dummy_input, None, None, None)
-                elapsed_time = time.time() - start_time
-            
-            avg_inference_time = (elapsed_time / num_iterations) * 1000  # Convert to ms
-            throughput = num_iterations / elapsed_time  # iterations per second
-            
-            # Model size calculation
-            model_size = sum(p.numel() * p.element_size() for p in exp.model.parameters()) / (1024 * 1024)  # MB
-            param_count = sum(p.numel() for p in exp.model.parameters())
-            
-            print(f"\n⚡ INFERENCE SPEED METRICS")
-            print(f"{'─'*80}")
-            print(f"Device: {'GPU' if (torch.cuda.is_available() and args.use_gpu) else 'CPU'}")
-            print(f"Batch Size: {args.batch_size}")
-            print(f"Sequence Length: {args.seq_len}")
-            print(f"Number of Iterations: {num_iterations}")
-            print(f"Average Inference Time: {avg_inference_time:.4f} ms/iteration")
-            print(f"Throughput: {throughput:.2f} iterations/second")
-            print(f"Samples/Second: {throughput * args.batch_size:.2f}")
-            
-            print(f"\n📦 MODEL SIZE METRICS")
-            print(f"{'─'*80}")
-            print(f"Total Parameters: {param_count:,}")
-            print(f"Model Size: {model_size:.2f} MB")
-            print(f"Memory per Parameter: {model_size / (param_count / 1e6):.2f} bytes/param")
-            print(f"{'─'*80}")
 
             if args.do_predict:
                 tracker.start(f'Predicting: {setting}')
