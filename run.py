@@ -287,8 +287,66 @@ if __name__ == '__main__':
             # Track testing
             tracker.start(f'Testing: {setting}')
             print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-            exp.test(setting)
+            test_results = exp.test(setting)
             tracker.stop(f'Testing: {setting}')
+            
+            # Inference speed benchmarking
+            print("\n" + "="*80)
+            print("INFERENCE SPEEDUP METRICS")
+            print("="*80)
+            
+            # Warm-up runs
+            print("\n🔥 Warming up model...")
+            exp.model.eval()
+            device = torch.device('cuda' if args.use_gpu else 'cpu')
+            dummy_input = torch.randn(args.batch_size, args.seq_len, exp.model.enc_in).to(device)
+            
+            for _ in range(10):
+                with torch.no_grad():
+                    _ = exp.model(dummy_input, None, None, None)
+            
+            # Benchmark inference speed
+            print("⚡ Benchmarking inference speed...")
+            num_iterations = 100
+            
+            if torch.cuda.is_available() and args.use_gpu:
+                torch.cuda.synchronize()
+                start_time = time.time()
+                for _ in range(num_iterations):
+                    with torch.no_grad():
+                        _ = exp.model(dummy_input, None, None, None)
+                torch.cuda.synchronize()
+                elapsed_time = time.time() - start_time
+            else:
+                start_time = time.time()
+                for _ in range(num_iterations):
+                    with torch.no_grad():
+                        _ = exp.model(dummy_input, None, None, None)
+                elapsed_time = time.time() - start_time
+            
+            avg_inference_time = (elapsed_time / num_iterations) * 1000  # Convert to ms
+            throughput = num_iterations / elapsed_time  # iterations per second
+            
+            # Model size calculation
+            model_size = sum(p.numel() * p.element_size() for p in exp.model.parameters()) / (1024 * 1024)  # MB
+            param_count = sum(p.numel() for p in exp.model.parameters())
+            
+            print(f"\n⚡ INFERENCE SPEED METRICS")
+            print(f"{'─'*80}")
+            print(f"Device: {'GPU' if (torch.cuda.is_available() and args.use_gpu) else 'CPU'}")
+            print(f"Batch Size: {args.batch_size}")
+            print(f"Sequence Length: {args.seq_len}")
+            print(f"Number of Iterations: {num_iterations}")
+            print(f"Average Inference Time: {avg_inference_time:.4f} ms/iteration")
+            print(f"Throughput: {throughput:.2f} iterations/second")
+            print(f"Samples/Second: {throughput * args.batch_size:.2f}")
+            
+            print(f"\n📦 MODEL SIZE METRICS")
+            print(f"{'─'*80}")
+            print(f"Total Parameters: {param_count:,}")
+            print(f"Model Size: {model_size:.2f} MB")
+            print(f"Memory per Parameter: {model_size / (param_count / 1e6):.2f} bytes/param")
+            print(f"{'─'*80}")
 
             # Apply optimization if enabled
             if args.apply_optimization:
@@ -303,6 +361,37 @@ if __name__ == '__main__':
                 print(f"\n📊 ORIGINAL MODEL:")
                 print(f"   Parameters: {original_stats['total_params']:,}")
                 print(f"   Size: {original_stats['model_size_mb']:.2f} MB")
+                
+                # Benchmark ORIGINAL model inference speed
+                print("\n⚡ Benchmarking ORIGINAL model inference speed...")
+                exp.model.eval()
+                device = torch.device('cuda' if args.use_gpu else 'cpu')
+                dummy_input = torch.randn(args.batch_size, args.seq_len, exp.model.enc_in).to(device)
+                
+                # Warm-up
+                for _ in range(10):
+                    with torch.no_grad():
+                        _ = exp.model(dummy_input, None, None, None)
+                
+                # Benchmark
+                num_iterations = 100
+                if torch.cuda.is_available() and args.use_gpu:
+                    torch.cuda.synchronize()
+                    start_time = time.time()
+                    for _ in range(num_iterations):
+                        with torch.no_grad():
+                            _ = exp.model(dummy_input, None, None, None)
+                    torch.cuda.synchronize()
+                    original_time = time.time() - start_time
+                else:
+                    start_time = time.time()
+                    for _ in range(num_iterations):
+                        with torch.no_grad():
+                            _ = exp.model(dummy_input, None, None, None)
+                    original_time = time.time() - start_time
+                
+                original_avg_time = (original_time / num_iterations) * 1000  # ms
+                print(f"   Average Inference Time: {original_avg_time:.4f} ms/iteration")
                 
                 # Apply pruning
                 print(f"\n🔧 Applying {args.pruning_strategy} pruning ({args.pruning_ratio*100:.0f}%)...")
@@ -325,10 +414,68 @@ if __name__ == '__main__':
                 print(f"   Parameters: {pruned_stats['total_params']:,}")
                 print(f"   Size: {pruned_stats['model_size_mb']:.2f} MB")
                 
+                # Benchmark OPTIMIZED model inference speed
+                print("\n⚡ Benchmarking OPTIMIZED model inference speed...")
+                exp.model.eval()
+                exp.model.to(device)
+                
+                # Warm-up
+                for _ in range(10):
+                    with torch.no_grad():
+                        _ = exp.model(dummy_input, None, None, None)
+                
+                # Benchmark
+                if torch.cuda.is_available() and args.use_gpu:
+                    torch.cuda.synchronize()
+                    start_time = time.time()
+                    for _ in range(num_iterations):
+                        with torch.no_grad():
+                            _ = exp.model(dummy_input, None, None, None)
+                    torch.cuda.synchronize()
+                    optimized_time = time.time() - start_time
+                else:
+                    start_time = time.time()
+                    for _ in range(num_iterations):
+                        with torch.no_grad():
+                            _ = exp.model(dummy_input, None, None, None)
+                    optimized_time = time.time() - start_time
+                
+                optimized_avg_time = (optimized_time / num_iterations) * 1000  # ms
+                print(f"   Average Inference Time: {optimized_avg_time:.4f} ms/iteration")
+                
+                # Calculate metrics
                 compression = original_stats['total_params'] / pruned_stats['total_params']
-                print(f"\n✅ COMPRESSION:")
-                print(f"   Ratio: {compression:.2f}x")
-                print(f"   Size Reduction: {(1-pruned_stats['model_size_mb']/original_stats['model_size_mb'])*100:.1f}%")
+                size_reduction = (1 - pruned_stats['model_size_mb'] / original_stats['model_size_mb']) * 100
+                speedup = original_avg_time / optimized_avg_time
+                time_savings = (1 - optimized_avg_time / original_avg_time) * 100
+                
+                # Print comprehensive comparison
+                print("\n" + "="*80)
+                print("INFERENCE SPEEDUP COMPARISON")
+                print("="*80)
+                
+                print(f"\n⚡ SPEEDUP METRICS")
+                print(f"{'─'*80}")
+                print(f"Original Model Inference:  {original_avg_time:.4f} ms/iteration")
+                print(f"Optimized Model Inference: {optimized_avg_time:.4f} ms/iteration")
+                print(f"Speedup Factor: {speedup:.2f}x")
+                print(f"Time Savings: {time_savings:.2f}%")
+                print(f"{'─'*80}")
+                
+                print(f"\n📦 MODEL SIZE COMPARISON")
+                print(f"{'─'*80}")
+                print(f"Original Model Size: {original_stats['model_size_mb']:.2f} MB")
+                print(f"Optimized Model Size: {pruned_stats['model_size_mb']:.2f} MB")
+                print(f"Compression Ratio: {compression:.2f}x")
+                print(f"Size Reduction: {size_reduction:.2f}%")
+                print(f"{'─'*80}")
+                
+                print(f"\n✅ OVERALL OPTIMIZATION SUMMARY")
+                print(f"{'─'*80}")
+                print(f"Parameters Reduced: {(original_stats['total_params'] - pruned_stats['total_params']):,}")
+                print(f"Memory Saved: {(original_stats['model_size_mb'] - pruned_stats['model_size_mb']):.2f} MB")
+                print(f"Inference Speed Improvement: {speedup:.2f}x faster")
+                print(f"{'─'*80}")
                 
                 tracker.stop('Model Optimization')
                 
