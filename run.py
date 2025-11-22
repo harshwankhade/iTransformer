@@ -2,6 +2,7 @@ import argparse
 import torch
 from experiments.exp_long_term_forecasting import Exp_Long_Term_Forecast
 from experiments.exp_long_term_forecasting_partial import Exp_Long_Term_Forecast_Partial
+from utils.model_pruning import MagnitudePruning, PruningAnalyzer
 import random
 import numpy as np
 import time
@@ -217,6 +218,11 @@ if __name__ == '__main__':
     parser.add_argument('--use_multi_gpu', action='store_true', help='use multiple gpus', default=False)
     parser.add_argument('--devices', type=str, default='0,1,2,3', help='device ids of multile gpus')
 
+    # Optimization options
+    parser.add_argument('--apply_optimization', type=int, default=0, help='apply model optimization (pruning)')
+    parser.add_argument('--pruning_ratio', type=float, default=0.3, help='ratio of weights to prune')
+    parser.add_argument('--pruning_strategy', type=str, default='magnitude', choices=['magnitude', 'structured'], help='pruning strategy')
+
     # iTransformer
     parser.add_argument('--exp_name', type=str, required=False, default='MTSF',
                         help='experiemnt name, options:[MTSF, partial_train]')
@@ -283,6 +289,53 @@ if __name__ == '__main__':
             print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
             exp.test(setting)
             tracker.stop(f'Testing: {setting}')
+
+            # Apply optimization if enabled
+            if args.apply_optimization:
+                print("\n" + "="*80)
+                print("APPLYING MODEL OPTIMIZATION")
+                print("="*80)
+                
+                tracker.start('Model Optimization')
+                
+                # Get original model stats
+                original_stats = PruningAnalyzer.analyze_model_size(exp.model)
+                print(f"\n📊 ORIGINAL MODEL:")
+                print(f"   Parameters: {original_stats['total_params']:,}")
+                print(f"   Size: {original_stats['model_size_mb']:.2f} MB")
+                
+                # Apply pruning
+                print(f"\n🔧 Applying {args.pruning_strategy} pruning ({args.pruning_ratio*100:.0f}%)...")
+                if args.pruning_strategy == 'magnitude':
+                    exp.model = MagnitudePruning.prune_model(
+                        exp.model,
+                        pruning_ratio=args.pruning_ratio,
+                        structured=False
+                    )
+                else:
+                    exp.model = MagnitudePruning.prune_model(
+                        exp.model,
+                        pruning_ratio=args.pruning_ratio,
+                        structured=True
+                    )
+                
+                # Get pruned model stats
+                pruned_stats = PruningAnalyzer.analyze_model_size(exp.model)
+                print(f"\n📊 OPTIMIZED MODEL:")
+                print(f"   Parameters: {pruned_stats['total_params']:,}")
+                print(f"   Size: {pruned_stats['model_size_mb']:.2f} MB")
+                
+                compression = original_stats['total_params'] / pruned_stats['total_params']
+                print(f"\n✅ COMPRESSION:")
+                print(f"   Ratio: {compression:.2f}x")
+                print(f"   Size Reduction: {(1-pruned_stats['model_size_mb']/original_stats['model_size_mb'])*100:.1f}%")
+                
+                tracker.stop('Model Optimization')
+                
+                # Save optimized model
+                model_path = f'./checkpoints/{setting}/optimized_model.pth'
+                torch.save(exp.model.state_dict(), model_path)
+                print(f"\n💾 Optimized model saved to: {model_path}")
 
             if args.do_predict:
                 tracker.start(f'Predicting: {setting}')
